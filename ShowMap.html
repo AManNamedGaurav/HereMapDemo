@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+   <head>
+      <meta name="viewport" content="initial-scale=1.0, width=device-width", maximum-scale=1.0, user-scalable=yes>
+      <meta http=equiv="Content-type" content="text/html;charset=UTF-8">
+      <script src="https://js.api.here.com/v3/3.1/mapsjs-core.js" type="text/javascript" charset="utf-8"></script>
+      <script src="https://js.api.here.com/v3/3.1/mapsjs-service.js" type="text/javascript" charset="utf-8"></script>
+      <script src="https://js.api.here.com/v3/3.1/mapsjs-ui.js" type="text/javascript"></script>
+      <script src="https://js.api.here.com/v3/3.1/mapsjs-mapevents.js" type="text/javascript"></script>
+      <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+      
+   </head>
+   <body>
+      <h3>Source:</h3>
+      <input class="inputCoord" type="number" placeholder="Source Latitude" id="sourceLatitude" required>
+      ,
+      <input class="inputCoord" type="number" placeholder="Source Longitude" id="sourceLongitude" required>
+      <h3>Destination:</h3>
+      <input class="inputCoord" type="number" placeholder="Destination Latitude" id="destinationLatitude" required>
+      ,
+      <input class="inputCoord" type="number" placeholder="Destination Longitude" id="destinationLongitude" required>
+      <br>
+      <button type="button" id="displayRoute" onclick="displayRoutes()">Display Routes</button>
+      <div style="width: 640px; height: 480px" id="mapContainer"></div>
+      
+      <script type="text/javascript">
+         
+         
+
+         function displayRoutes(){
+            //check if input is good
+            var isInputGood = true;
+            $(".inputCoord").each(function(){
+               isInputGood = !($(this).val() == '');
+            });
+
+            if(isInputGood){
+               const sourceCoords = {
+                  lat: parseFloat($("#sourceLatitude").val()).toFixed(5),
+                  lng: parseFloat($("#sourceLongitude").val()).toFixed(5)
+               }
+               const destCoords = {
+                  lat: parseFloat($("#destinationLatitude").val()).toFixed(5),
+                  lng: parseFloat($("#destinationLongitude").val()).toFixed(5)
+               }
+
+               _calculateAndDisplayRoutes(sourceCoords, destCoords);
+
+            }else{
+               //alert that input is not good
+               alert('At least one of the fields is blank!');
+            }
+
+         }
+
+         
+         function _calculateAndDisplayRoutes(sourceCoords, destCoords){
+
+            // Create the parameters for the routing request:
+            var fastRoutingParameters = {
+               'routingMode': 'fast',
+               'transportMode': 'car',
+               // The start point of the route:
+               'origin': new String(sourceCoords.lat + ',' + sourceCoords.lng),
+               // The end point of the route:
+               'destination': new String(destCoords.lat + ',' + destCoords.lng),
+               // Include the route shape in the response
+               'return': [
+                  'polyline',
+                  'summary',
+               ],
+
+
+            };
+            var shortRoutingParameters = {
+               'routingMode': 'short',
+               'transportMode': 'car',
+               // The start point of the route:
+               'origin': new String(sourceCoords.lat + ',' + sourceCoords.lng),
+               // The end point of the route:
+               'destination': new String(destCoords.lat + ',' + destCoords.lng),
+               // Include the route shape in the response
+               'return': [
+                  'polyline',
+                  'summary',
+               ],
+
+            }
+
+            
+            function _constructRouteInfoHTML(summary){
+               const dur = summary.duration;
+               const length = summary.length;
+               const html = "<div><h3>Duration: " + dur + "</h3><br><h3>Length: " + length + "</h3></div>";
+               return html;
+            }
+            
+            
+            // Define a callback function to process the routing response:
+            var onResult = function(result) {
+               // ensure that at least one route was found
+               console.log("Number of routes calculated: " + result.routes.length);
+               if (result.routes.length) {
+                  result.routes.forEach((route) => {
+                     console.log("in route " + route.id);
+                     route.sections.forEach((section) => {
+                        // Create a linestring to use as a point source for the route line
+                        let linestring = H.geo.LineString.fromFlexiblePolyline(section.polyline);
+
+                        // Create an outline for the route polyline:
+                        var routeOutline = new H.map.Polyline(linestring, {
+                           style: {
+                              lineWidth: 10,
+                              strokeColor: 'rgba(0, 128, 255, 0.7)',
+                              lineTailCap: 'arrow-tail',
+                              lineHeadCap: 'arrow-head'
+                           }
+                        });
+
+                        // Create a patterned polyline:
+                        var routeArrows = new H.map.Polyline(linestring, {
+                           style: {
+                              lineWidth: 10,
+                              fillColor: 'white',
+                              strokeColor: 'rgba(255, 255, 255, 1)',
+                              lineDash: [0, 2],
+                              lineTailCap: 'arrow-tail',
+                              lineHeadCap: 'arrow-head'
+                           }
+                        }
+                        );
+
+                        // create a group that represents the route line and contains
+                        // outline and the pattern
+                        var routeLine = new H.map.Group();
+                        routeLine.addObjects([routeOutline, routeArrows]);
+                        
+                        
+                        //set the route line's data as the html above so that it can be accessed by the infobubble creator
+                        routeLine.setData('test');
+
+                        // add 'tap' event listener, that opens info bubble, 
+                        routeLine.addEventListener('tap', logEvent);
+
+                        // Create a marker for the start point:
+                        let startMarker = new H.map.Marker(section.departure.place.location);
+
+                        // Create a marker for the end point:
+                        let endMarker = new H.map.Marker(section.arrival.place.location);
+
+                        // Add the two markers to the map:
+                        map.addObjects([routeLine, startMarker, endMarker]);
+
+                        // Set the map's viewport to make the whole route visible:
+                        map.getViewModel().setLookAtData({ bounds: routeLine.getBoundingBox() });
+                     });
+                  });
+               }
+            };
+
+            // Get an instance of the routing service version 8:
+            var router = platform.getRoutingService(null, 8);
+
+            // Call calculateRoute() with the routing parameters,
+            // the callback and an error callback function (called if a
+            // communication error occurs):
+            console.log("calculating and displaying fastest route");
+            router.calculateRoute(fastRoutingParameters, onResult,
+            function(error) {
+               alert(error.message);
+            });
+
+            console.log("calculating and displaying shortest route");
+            router.calculateRoute(shortRoutingParameters, onResult,
+            function(error) {
+               alert(error.message);
+            });
+
+         }
+         
+         //handles tap events on routes
+         function onRouteTap(evt){
+               console.log('User has clicked a route line!');
+               var bubble = new H.ui.InfoBubble(evt.target.getGeometry(), {
+                  // read custom data
+                  content: evt.target.getData()
+               });
+               // show info bubble
+               ui.addBubble(bubble);
+         }
+
+         //dynamically sanitize input for coordinates
+         $(".inputCoord").blur(function(){
+            //parse the value inside the field into a float
+            const valueAsFloat = parseFloat($(this).val()).toFixed(5);
+            if(!isNaN(valueAsFloat)){
+               $(this).val(valueAsFloat);
+            }else{
+               $(this).val('');
+            }
+         });
+
+
+
+         //boilerplate code for setting up a HERE map 
+         // Initialize the platform object:
+         platform = new H.service.Platform({
+            'apikey': 'tT7KnwNzrHRISyOgAXnZ9OfViWeD49DT-tJ3jx38xEQ'
+         });
+         // Obtain the default map types from the platform object
+         var defaultLayers = platform.createDefaultLayers();
+         // Instantiate (and display) a map object:
+         var map = new H.Map(document.getElementById('mapContainer'),
+            defaultLayers.vector.normal.map, {
+            center: { lat: 32, lng: -96 },   //centered on Dallas, TX
+            zoom: 5,
+            pixelRatio: window.devicePixelRatio || 1
+         });
+
+         // add a resize listener to make sure that the map occupies the whole container
+         window.addEventListener('resize', () => map.getViewPort().resize());
+
+         // MapEvents enables the event system
+         // Behavior implements default interactions for pan/zoom (also on mobile touch environments)
+         var behavior = new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
+
+         //create default UI with layers provided by the platform
+         var ui = H.ui.UI.createDefault(map, defaultLayers, 'en-US');
+
+         //helper for logging map object events
+         function logEvent(evt) {
+            console.log(['event "', evt.type, '" @ ' + evt.target.getData()].join(''));
+         }
+
+         $("#sourceLatitude").val('32.97116');
+         $("#sourceLongitude").val('-97.00311');
+         $("#destinationLatitude").val('32.77917');
+         $("#destinationLongitude").val('-96.80889');
+      </script>
+   </body>
+</html>
